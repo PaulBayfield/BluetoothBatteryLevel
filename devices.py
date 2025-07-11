@@ -1,3 +1,6 @@
+import hashlib
+
+
 class Device:
     """
     Class to represent a bluetooth device
@@ -54,27 +57,46 @@ class Device:
         self.__batteryLevel = value
 
 
+    @property
+    def state(self) -> str:
+        """
+        Get the state of the device.
+        
+        :return: The state of the device
+        :rtype: str
+        """
+        return hashlib.blake2b(
+            f"{self.name}{self.status}{self.instanceID}{self.batteryLevel}".encode(),
+            digest_size=16
+        ).hexdigest()
+
+
 class Devices:
     """
     Class to represent a list of bluetooth devices
     """
-    def __init__(self) -> None:
+    def __init__(self, devices: list) -> None:
         """
         Initialise a list of bluetooth devices
         """
-        self.devices: list = []
+        self.__devices = devices
 
-    
+
+    @property
+    def devices(self):
+        return self.__devices
+
+
     def add(self, device: Device):
-        self.devices.append(device)
+        self.__devices.append(device)
 
 
     def remove(self, device: Device):
-        self.devices.remove(device)
+        self.__devices.remove(device)
 
 
     def __getitem__(self, name):
-        for device in self.devices:
+        for device in self.__devices:
             device: Device
             if device.name == name:
                 return device
@@ -83,16 +105,16 @@ class Devices:
 
 
     def __iter__(self):
-        return iter(self.devices)
+        return iter(self.__devices)
     
 
     def __str__(self) -> str:
-        return str(self.devices)
+        return str(self.__devices)
     
 
     def __repr__(self) -> str:
-        return str(self.devices)
+        return str(self.__devices)
     
 
     def __len__(self) -> int:
-        return len(self.devices)
+        return len(self.__devices)

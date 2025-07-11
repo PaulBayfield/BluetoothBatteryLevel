@@ -1,44 +1,61 @@
 import subprocess
+import concurrent.futures
+import threading
 
 from devices import Devices, Device
 
 
 class Bluetooth:
     """
-    Class to represent the bluetooth devices
+    Class to represent the Bluetooth devices.
     """
-    def __init__(self) -> None:
+
+    def __init__(self, automatically_refresh: bool = False) -> None:
         """
-        Initialise the bluetooth devices
+        Initialise the Bluetooth devices.
+
+        :param automatically_refresh: Whether to automatically refresh the Bluetooth devices
+        :type automatically_refresh: bool
         """
-        print("Initialising bluetooth...")
-        self.devices: Devices = Devices()
+        self.__devices: Devices = Devices(
+            [Device(device) for device in self.getAllDevices()]
+        )
 
-
-        print("Getting bluetooth devices...")
-        for device in self.getAllDevices():
-            self.devices.add(Device(device))
-
-        print(f"Found {len(self.devices)} bluetooth devices")
-
-
-        print("Getting bluetooth devices status...")
         self.getStatusAudioDevices()
 
-
-        print("Getting instances IDs...")
-        for device in self.devices:
-            device: Device
+        def __set_instance_id(device):
             device.instanceID = self.getInstanceId(device.name)
 
-            print(f"> {device.name} - {device.status} - {device.instanceID}")
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            list(executor.map(__set_instance_id, self.__devices))
+
+        self.refresh()
+
+        if automatically_refresh:
+            self.__stop_refresh = False
+            self.__refresh_thread = threading.Thread(
+                target=self.__auto_refresh_loop, daemon=True
+            )
+            self.__refresh_thread.start()
+
+
+    @property
+    def devices(self) -> Devices:
+        """
+        Get the Bluetooth devices.
+
+        :return: The Bluetooth devices
+        :rtype: Devices
+        """
+        return self.__devices.devices
 
 
     def getAllDevices(self) -> list:
         """
-        Get all bluetooth devices
-        
-        :return: A list of bluetooth devices
+        Get all Bluetooth devices.
+
+        :return: A list of Bluetooth devices
+        :rtype: list
         """
         bluetoothDevices = subprocess.check_output(
             [
@@ -59,9 +76,10 @@ class Bluetooth:
 
     def getStatusAudioDevices(self) -> list:
         """
-        Get the status of the audio devices
-        
-        :return: A list of bluetooth devices
+        Get the status of the audio devices.
+
+        :return: A list of Bluetooth devices
+        :rtype: list
         """
         try:
             services = subprocess.check_output(
@@ -85,34 +103,33 @@ class Bluetooth:
         except subprocess.CalledProcessError:
             return ""
 
-
         for service in services.strip().split("\r\n"):
             if "OK" in service:
                 name = service.split("OK")[0].strip()
-
-                for device in self.devices:
+                for device in self.__devices:
                     device: Device
                     if device.name in name:
                         device.status = True
                         break
             else:
                 name = service.split("Unknown")[0].strip()
-
-                for device in self.devices:
+                for device in self.__devices:
                     device: Device
                     if device.name in name:
                         device.status = False
                         break
 
-        return self.devices
+        return self.__devices
 
 
     def getInstanceId(self, deviceName: str) -> str:
         """
-        Get the instance ID of a bluetooth device
-        
-        :param deviceName: The name of the bluetooth device
-        :return: The instance ID of the bluetooth device
+        Get the instance ID of a Bluetooth device.
+
+        :param deviceName: The name of the Bluetooth device
+        :type deviceName: str
+        :return: The instance ID of the Bluetooth device
+        :rtype: str
         """
         isinstanceId = subprocess.check_output(
             [
@@ -146,10 +163,12 @@ class Bluetooth:
 
     def getBatteryLevel(self, device: Device) -> int:
         """
-        Get the battery level of a bluetooth device
-        
-        :param device: The bluetooth device
-        :return: The battery level of the bluetooth device
+        Get the battery level of a Bluetooth device.
+
+        :param device: The Bluetooth device
+        :type device: Device
+        :return: The battery level of the Bluetooth device
+        :rtype: int
         """
         battery_level = subprocess.check_output(
             [
@@ -166,48 +185,44 @@ class Bluetooth:
         ).decode("utf-8")
 
         device.batteryLevel = int(battery_level)
-
         return device.batteryLevel
 
 
     def refreshBatteryLevel(self) -> None:
         """
-        Refresh the battery level of all bluetooth devices
+        Refresh the battery level of all Bluetooth devices.
         """
-        for device in self.devices:
-            device: Device
+        def __update_battery(device):
             if device.status:
                 self.getBatteryLevel(device)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            list(executor.map(__update_battery, self.__devices))
 
 
     def refresh(self) -> None:
         """
-        Refresh the bluetooth devices status and battery level
+        Refresh the Bluetooth devices status and battery level.
         """
         self.getStatusAudioDevices()
         self.refreshBatteryLevel()
 
 
-    def run(self) -> None:
+    def __auto_refresh_loop(self):
         """
-        Run the bluetooth devices
+        Continuously refresh the Bluetooth devices in the background.
         """
-        print("\nUpdating bluetooth devices...")
-        self.refresh()
-
-        for device in self.devices:
-            device: Device
-            if device.status:
-                print(f"[✔] {device.name} - {device.batteryLevel}%")
-            else:
-                print(f"[✘] {device.name}")
+        while self.__stop_refresh is False:
+            try:
+                self.refresh()
+            except Exception as e:
+                print(f"[Auto Refresh Error] {e}")
 
 
-if __name__ == "__main__":
-    """
-    Run the bluetooth devices
-    """
-    bluetooth = Bluetooth()
-
-    while True:
-        bluetooth.run()
+    def stop_auto_refresh(self):
+        """
+        Stops the automatic refresh background thread.
+        """
+        self.__stop_refresh = True
+        if hasattr(self, "__refresh_thread"):
+            self.__refresh_thread.join(timeout=5)
